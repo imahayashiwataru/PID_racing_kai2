@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PID Racing Lab (3D Web)</title>
+  <style>
+    body { margin:0; font-family: system-ui, sans-serif; background:#0f0f12; color:#eee; }
+    #layout { display:grid; grid-template-columns: 1fr 380px; height:100vh; }
+    #view { width:100%; height:100%; display:block; }
+    #side { border-left:1px solid #2a2a2a; padding:12px; overflow:auto; }
+    .card { background:#17171c; border:1px solid #2a2a2a; border-radius:12px; padding:12px; margin-bottom:12px; }
+    .row { display:flex; gap:10px; align-items:center; justify-content:space-between; margin:8px 0; }
+    input, select { width: 220px; }
+    button { padding:8px 10px; border-radius:10px; border:1px solid #333; background:#222; color:#eee; cursor:pointer; }
+    button:hover { background:#2a2a2a; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; color:#c8c8c8; white-space:pre-wrap; }
+    .small { font-size: 12px; color:#c8c8c8; }
+    .pill { display:inline-block; padding:2px 8px; border:1px solid #333; border-radius:999px; font-size:12px; color:#c8c8c8; }
+  </style>
+
+  <!-- KaTeX for transfer function display -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+</head>
+
+<body>
+<div id="layout">
+  <canvas id="view"></canvas>
+
+  <div id="side">
+    <div class="card">
+      <div class="row">
+        <strong>PID Racing Lab</strong>
+        <span class="pill" id="statusPill">ready</span>
+      </div>
+      <div class="small">Googleフォーム→Sheet→Apps Script(JSON)→150台同時走行</div>
+    </div>
+
+    <div class="card">
+      <strong>Google Sheets API</strong>
+      <div class="row">
+        <label>Apps Script URL</label>
+      </div>
+      <div class="row">
+        <input id="apiUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+      </div>
+      <div class="row">
+        <label>Sheet名</label>
+        <input id="sheetName" value="フォームの回答 1" />
+      </div>
+      <div class="row">
+        <label>最大台数</label>
+        <input id="maxCars" type="number" min="1" max="2" value="1" />
+      </div>
+      <div class="row">
+        <button id="loadBtn">Load from Sheet</button>
+        <button id="demoBtn">Demo 1</button>
+      </div>
+      <div class="mono" id="apiLog"></div>
+    </div>
+
+    <div class="card">
+      <strong>課題モード</strong>
+      <div class="row">
+        <label>Mode</label>
+        <select id="taskMode">
+          <option value="P">P</option>
+          <option value="PD">PD</option>
+          <option value="PID" selected>PID</option>
+        </select>
+      </div>
+      <div class="small">P: Ki=0,Kd=0 固定 / PD: Ki=0 固定 / PID: 全解放</div>
+    </div>
+
+    <div class="card">
+      <strong>コース</strong>
+      <div class="row">
+        <label>Course</label>
+        <select id="course">
+          <option value="STRAIGHT">STRAIGHT（直線）</option>
+          <option value="OVAL" selected>OVAL（運動場）</option>
+          <option value="SLALOM">SLALOM（S字）</option>
+          <option value="CHICANE">CHICANE（シケイン）</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Camera</label>
+        <select id="cameraMode">
+          <option value="CHASE" selected>CHASE（追従）</option>
+          <option value="TOP">TOP（俯瞰）</option>
+          <option value="FIXED">FIXED（固定）</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Focus car</label>
+        <select id="focusCar"></select>
+      </div>
+      <div class="row">
+        <button id="startPauseBtn">Pause</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <strong>制御対象（表示用モデル）</strong>
+      <div class="small">※シミュレータ内部は非線形（自転車モデル）。ここは授業用の近似モデル表示。</div>
+      <div class="mono" id="tfBox"></div>
+    </div>
+
+    <div class="card">
+  <div class="row"><b>PID Tuning (Focus Car)</b></div>
+
+  <div class="row">
+    <label>Kp</label>
+    <input id="kpIn" type="number" step="0.01" value="2.0">
+  </div>
+  <div class="row">
+    <label>Ki</label>
+    <input id="kiIn" type="number" step="0.0001" value="0.0000">
+  </div>
+  <div class="row">
+    <label>Kd</label>
+    <input id="kdIn" type="number" step="0.01" value="0.5">
+  </div>
+
+  <div class="row">
+    <label>dfHz</label>
+    <input id="dfHzIn" type="number" step="0.1" value="10.0">
+  </div>
+
+  <div class="row">
+    <label>anti-windup</label>
+    <input id="awIn" type="number" step="0.01" value="0.60">
+  </div>
+
+  <div class="row">
+    <label>vCmd</label>
+    <input id="vIn" type="number" step="0.1" value="10.0">
+  </div>
+
+  <div class="row">
+    <label>lookahead</label>
+    <input id="lookIn" type="number" step="0.1" value="12.0">
+  </div>
+
+  <div class="row">
+    <label>steerLimit(deg)</label>
+    <input id="steerLimIn" type="number" step="0.1" value="22.0">
+  </div>
+
+  <div class="row">
+    <button id="applyGainBtn">Apply</button>
+    <button id="loadGainBtn">Load from Focus</button>
+    <button id="distBtn">Disturbance: OFF</button>
+  </div>
+</div>
+
+    <div class="card">
+      <strong>テレメトリ</strong>
+      <div class="mono" id="telemetry"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+<script>
+  // KaTeX auto render
+  window.addEventListener("load", () => {
+    if (window.renderMathInElement) {
+      window.renderMathInElement(document.body, {
+        delimiters: [
+          {left: "$$", right: "$$", display: true},
+          {left: "$", right: "$", display: false}
+        ]
+      });
+    }
+  });
+</script>
+</body>
+</html>
